@@ -40,6 +40,7 @@ interface LocalAudioStatus {
 interface AudioWaveProps {
   isPlaying: boolean;
   onPress: () => void;
+  isMuted?: boolean;
 }
 
 // Interface local para status do áudio
@@ -224,7 +225,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 };
 
 // Audio wave component for TTS
-const AudioWave: React.FC<AudioWaveProps> = ({ isPlaying, onPress }) => {
+const AudioWave: React.FC<AudioWaveProps> = ({ isPlaying, onPress, isMuted }) => {
   return (
     <TouchableOpacity 
       style={styles.audioWaveContainer}
@@ -250,7 +251,7 @@ const AudioWave: React.FC<AudioWaveProps> = ({ isPlaying, onPress }) => {
           />
         </View>
         
-        {/* Botão de pause à direita */}
+        {/* Botão de pause/play à direita */}
         <View style={styles.playButtonContainer}>
           {isPlaying ? (
             <View style={styles.pauseIconContainer}>
@@ -258,7 +259,11 @@ const AudioWave: React.FC<AudioWaveProps> = ({ isPlaying, onPress }) => {
               <View style={styles.pauseBar}></View>
             </View>
           ) : (
-            <Ionicons name="play" size={24} color="#ffffff" />
+            isMuted ? (
+              <Ionicons name="volume-mute" size={24} color="#ffffff" />
+            ) : (
+              <Ionicons name="play" size={24} color="#ffffff" />
+            )
           )}
         </View>
       </View>
@@ -314,6 +319,7 @@ export default function ChatScreen() {
   const [currentSpeakingMessageId, setCurrentSpeakingMessageId] = useState<string | null>(null);
   const [displaySpeechText, setDisplaySpeechText] = useState<string>('');
   const [showSpeechBubble, setShowSpeechBubble] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState(false);
   
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
   const router = useRouter();
@@ -625,6 +631,8 @@ export default function ChatScreen() {
     Speech.stop();
     setIsSpeaking(false);
     setIsAudioPlaying(false);
+    setIsMuted(false); // Resetar o estado de mudo
+    setAudioFinished(true); // Indicar que o áudio terminou
     setSpeechProgress(1);
     setCurrentSpeakingMessageId(null);
     setShowSpeechBubble(false);
@@ -632,6 +640,49 @@ export default function ChatScreen() {
     if (textAnimationIntervalRef.current) {
       clearInterval(textAnimationIntervalRef.current);
       textAnimationIntervalRef.current = null;
+    }
+  };
+  
+  // Nova função para alternar entre pausar e continuar o áudio sem ocultar o componente
+  const toggleAudio = async () => {
+    if (isSpeaking) {
+      if (isAudioPlaying) {
+        // Pausar o áudio sem remover o componente
+        await Speech.pause();
+        setIsAudioPlaying(false);
+        setIsMuted(true); // Indicar que o áudio está mudo
+        
+        // Se a mensagem temporária existe e o texto está completamente mostrado,
+        // garantir que ela seja adicionada ao chat como visível
+        if (speechProgress >= 1 && currentSpeakingMessageId) {
+          // Converter a mensagem temporária para visível
+          setMessages(prev => prev.map(msg => {
+            if (msg.id === currentSpeakingMessageId) {
+              return {
+                ...msg,
+                hidden: false
+              };
+            }
+            return msg;
+          }));
+          
+          // Adicionar um tempo para fechar os componentes visuais
+          setTimeout(() => {
+            setShowSpeechBubble(false);
+            setShowAudioWave(false);
+            setAudioFinished(true);
+          }, 2000);
+        }
+      } else {
+        // Continuar o áudio
+        await Speech.resume();
+        setIsAudioPlaying(true);
+        setIsMuted(false); // Indicar que o áudio não está mais mudo
+      }
+    } else if (audioFinished) {
+      // Se o áudio terminou mas o componente ainda está visível, escondê-lo
+      setShowSpeechBubble(false);
+      setShowAudioWave(false);
     }
   };
   
@@ -726,6 +777,11 @@ export default function ChatScreen() {
       setDisplaySpeechText(''); // Iniciar com texto vazio
       setShowSpeechBubble(true); // Mostrar o balão de fala
       
+      // Guardar a referência do ID da mensagem temporária
+      if (tempId) {
+        setCurrentSpeakingMessageId(tempId);
+      }
+      
       // Estima a duração total da fala (aproximadamente 15 caracteres por segundo)
       const estimatedDuration = Math.max(3000, text.length * 65); // Mínimo 3 segundos
       const updateInterval = 50; // Atualização a cada 50ms
@@ -752,6 +808,33 @@ export default function ChatScreen() {
           if (textAnimationIntervalRef.current) {
             clearInterval(textAnimationIntervalRef.current);
             textAnimationIntervalRef.current = null;
+            
+            // Quando o texto terminar de ser exibido completamente, 
+            // verificamos se a mensagem temporária precisa ser convertida para visível
+            if (tempId) {
+              // Converter a mensagem temporária em visível, independente do estado do áudio
+              setMessages(prev => prev.map(msg => {
+                if (msg.id === tempId) {
+                  return {
+                    ...msg,
+                    hidden: false // Torna a mensagem visível no chat
+                  };
+                }
+                return msg;
+              }));
+              
+              // Scroll to bottom após mostrar a mensagem
+              scrollToBottom();
+            }
+            
+            // Verificar se o áudio está pausado ou mudo
+            if (!isAudioPlaying) {
+              setTimeout(() => {
+                setShowSpeechBubble(false);
+                setShowAudioWave(false);
+                setAudioFinished(true);
+              }, 2000); // Esperar 2 segundos após o texto ser exibido completamente
+            }
           }
         }
       }, updateInterval);
@@ -766,7 +849,8 @@ export default function ChatScreen() {
         onDone: () => {
           setIsSpeaking(false);
           setIsAudioPlaying(false);
-          setAudioFinished(true);
+          setIsMuted(false); // Resetar o estado mudo
+          setAudioFinished(true); // Sempre indicar que o áudio terminou
           setSpeechProgress(1);
           setCurrentSpeakingMessageId(null);
           
@@ -790,9 +874,10 @@ export default function ChatScreen() {
             // Scroll to bottom após mostrar a mensagem
             scrollToBottom();
             
-            // Ocultar o balão após um tempo
+            // Sempre ocultar o balão quando terminar, independente do estado mudo
             setTimeout(() => {
               setShowSpeechBubble(false);
+              setShowAudioWave(false); // Esconder componente de áudio também
             }, 1000);
           }
           
@@ -805,10 +890,10 @@ export default function ChatScreen() {
         onError: () => {
           setIsSpeaking(false);
           setIsAudioPlaying(false);
-          setAudioFinished(true);
+          setIsMuted(false); // Resetar o estado mudo
+          setAudioFinished(true); // Sempre indicar que o áudio terminou
           setSpeechProgress(1);
           setCurrentSpeakingMessageId(null);
-          setShowSpeechBubble(false);
           
           // Mostrar a mensagem definitiva mesmo em caso de erro
           if (tempId) {
@@ -1108,7 +1193,8 @@ export default function ChatScreen() {
           <View style={styles.audioWaveContainer}>
             <AudioWave
               isPlaying={isAudioPlaying}
-              onPress={stopSpeaking}
+              onPress={toggleAudio}
+              isMuted={isMuted}
             />
           </View>
           
