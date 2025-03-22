@@ -57,7 +57,7 @@ interface Message {
   audioUri?: string;
   audioDuration?: number;
   status?: string;
-  hidden?: boolean; // Propriedade adicional para indicar se a mensagem deve ser escondida
+  hidden?: boolean; // Propriedade para indicar se a mensagem deve ser escondida
 }
 
 // Modificar a interface MessageBubbleProps para remover propriedades de animação
@@ -575,26 +575,14 @@ export default function ChatScreen() {
       setIsLoading(true);
       setError(null);
       
-      // Obtém a mensagem de boas-vindas da API
-      const response = await ChatService.getWelcomeMessage();
+      // Não carrega mais mensagem de boas-vindas, inicia com chat vazio
+      setMessages([]);
+      setIsLoading(false);
       
-      if (response.success && response.data) {
-        setMessages([response.data]);
-        
-        // Inicia a síntese de voz após um pequeno delay
-        setTimeout(() => {
-          if (response.data.text) {
-            speakMessage(response.data.text);
-          }
-        }, 300);
-      } else {
-        setError(response.error || 'Erro ao carregar mensagem inicial');
-      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       console.error('Erro ao inicializar chat:', errorMessage);
       setError('Não foi possível carregar o chat. Tente novamente mais tarde.');
-    } finally {
       setIsLoading(false);
     }
   }, []);
@@ -900,7 +888,7 @@ export default function ChatScreen() {
       setPlayingMessageUri(uri);
       
       // Listen for status updates
-      newSound.setOnPlaybackStatusUpdate((status: AVPlaybackStatus) => {
+      newSound.setOnPlaybackStatusUpdate((status: import('expo-av').AVPlaybackStatus) => {
         if (status.isLoaded && status.didJustFinish) {
           setPlayingMessageUri(null);
         }
@@ -1456,18 +1444,20 @@ const styles = StyleSheet.create({
     marginTop: -15, // Sobrepor levemente para dar impressão de continuidade
   },
   speechBubbleInner: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: '#e8f5e9', // Cor de fundo verde claro para destacar do chat
     padding: 15,
     borderRadius: 15,
     borderTopLeftRadius: 0, // Cantos superiores retos para dar sensação de continuidade
     borderTopRightRadius: 0, // Cantos superiores retos para dar sensação de continuidade
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 3,
-    borderTopWidth: 1, // Adiciona borda sutil no topo
-    borderTopColor: 'rgba(76, 175, 80, 0.3)', // Cor levemente verde para combinar com o áudio
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1, // Borda em todos os lados
+    borderColor: 'rgba(76, 175, 80, 0.5)', // Borda verde mais visível
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(76, 175, 80, 0.5)', // Cor verde para combinar com o áudio
   },
   speechBubbleText: {
     fontSize: 16,

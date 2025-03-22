@@ -12,6 +12,7 @@ export interface Message {
     status?: MessageStatus;
     audioUri?: string;
     audioDuration?: number;
+    hidden?: boolean;
 }
 
 // Interface para as props do componente MessageBubble
