@@ -320,6 +320,7 @@ export default function ChatScreen() {
   const [displaySpeechText, setDisplaySpeechText] = useState<string>('');
   const [showSpeechBubble, setShowSpeechBubble] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isTyping, setIsTyping] = useState(false); // Estado para controlar o indicador "digitando"
   
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
   const router = useRouter();
@@ -666,12 +667,13 @@ export default function ChatScreen() {
             return msg;
           }));
           
+          // MODIFICAÇÃO: Aumentar o delay antes de fechar os componentes visuais
           // Adicionar um tempo para fechar os componentes visuais
           setTimeout(() => {
             setShowSpeechBubble(false);
             setShowAudioWave(false);
             setAudioFinished(true);
-          }, 2000);
+          }, 5000); // AUMENTAR: de 2000ms para 5000ms (5 segundos)
         }
       } else {
         // Continuar o áudio
@@ -681,13 +683,16 @@ export default function ChatScreen() {
       }
     } else if (audioFinished) {
       // Se o áudio terminou mas o componente ainda está visível, escondê-lo
-      setShowSpeechBubble(false);
-      setShowAudioWave(false);
+      // MODIFICAÇÃO: Adicionar um delay para dar tempo do usuário ver o texto
+      setTimeout(() => {
+        setShowSpeechBubble(false);
+        setShowAudioWave(false);
+      }, 2000); // Adicionar 2 segundos de delay
     }
   };
   
   // Agora a função sendMessage pode usar stopSpeaking sem problemas
-  const sendMessage = useCallback(() => {
+  const sendMessage = useCallback(async () => {
     if (!inputText.trim()) return;
     
     // Stop any speech when user sends message
@@ -698,10 +703,13 @@ export default function ChatScreen() {
     setCurrentSpeakingMessageId(null);
     setSpeechProgress(0);
     
+    // Salva o texto da mensagem para enviar à API
+    const messageText = inputText.trim();
+    
     // Create user message
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
-      text: inputText.trim(),
+      text: messageText,
       isUser: true,
       timestamp: new Date(),
       status: 'sent',
@@ -721,54 +729,76 @@ export default function ChatScreen() {
         )
       );
       
-      // Simulate assistant response
-      setTimeout(() => {
-        // Update status to read
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === userMessage.id ? {...msg, status: 'read'} : msg
-          )
-        );
-        
-        // Generate assistant response based on user message
-        let responseText = "Obrigado por sua mensagem. Estou processando sua pergunta e logo terei uma resposta para você.";
-        
-        // Simple keyword-based responses
-        const lowerCaseInput = inputText.toLowerCase();
-        if (lowerCaseInput.includes('substituir') || lowerCaseInput.includes('substituição')) {
-          responseText = "Para substituir um alimento, procure por opções com perfil nutricional semelhante. Por exemplo, você pode trocar arroz por quinoa, ou frango por peixe.";
-        } else if (lowerCaseInput.includes('refeição') || lowerCaseInput.includes('próxima')) {
-          responseText = "Sua próxima refeição está programada conforme seu plano alimentar. Lembre-se de manter o intervalo de 3-4 horas entre as refeições para melhor metabolismo.";
+      // NOVA IMPLEMENTAÇÃO: Chamar a API externa (mock) do ChatGPT
+      const callExternalAPI = async () => {
+        try {
+          // Mostrar indicador de digitação
+          setIsTyping(true);
+          
+          // Chamar o serviço de chat para obter a resposta da API
+          const data = await ChatService.sendMessage(messageText);
+          
+          // Atualizar status para lido quando receber a resposta
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === userMessage.id ? {...msg, status: 'read'} : msg
+            )
+          );
+          
+          // Criar ID para a mensagem do assistente
+          const tempId = 'temp-' + Date.now().toString();
+          
+          // Extrair a resposta da API
+          const responseText = data.response;
+          
+          // Criar mensagem oculta temporária
+          const hiddenMessage: ChatMessage = {
+            id: tempId,
+            text: responseText,
+            isUser: false,
+            timestamp: new Date(),
+            hidden: true // Propriedade para indicar que a mensagem está oculta
+          };
+          
+          // Adicionar mensagem escondida ao histórico
+          setMessages(prev => [...prev, hiddenMessage]);
+          
+          // Esconder indicador de digitação e iniciar reprodução
+          setIsTyping(false);
+          setShowAudioWave(true);
+          setAudioFinished(false);
+          
+          // Iniciar reprodução de texto com áudio
+          setTimeout(() => {
+            speakMessage(responseText, tempId);
+          }, 100);
+          
+        } catch (error) {
+          console.error('Erro ao chamar a API:', error);
+          setIsTyping(false);
+          
+          // Tratar erro de API com mensagem amigável
+          const errorMessage = "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.";
+          
+          const errorResponseMessage: ChatMessage = {
+            id: Date.now().toString(),
+            text: errorMessage,
+            isUser: false,
+            timestamp: new Date()
+          };
+          
+          setMessages(prev => [...prev, errorResponseMessage]);
+          scrollToBottom();
         }
-        
-        // Variável para guardar a ID da mensagem temporária
-        const tempId = 'temp-' + Date.now().toString();
-        
-        // Iniciar reprodução de áudio e mostrar o componente de onda
-        setShowAudioWave(true);
-        setAudioFinished(false);
-        
-        // Criar uma mensagem temporária invisível (somente para sincronização)
-        const hiddenMessage: ChatMessage = {
-          id: tempId,
-          text: responseText,
-          isUser: false,
-          timestamp: new Date(),
-          hidden: true // Propriedade adicional para indicar mensagem escondida
-        };
-        
-        // Adicionar a mensagem temporária escondida
-        setMessages(prev => [...prev, hiddenMessage]);
-        
-        // Iniciar a sincronização de texto e áudio
-        setTimeout(() => {
-          speakMessage(responseText, tempId);
-        }, 100);
-      }, 1000);
+      };
+      
+      // Executar a chamada à API
+      callExternalAPI();
+      
     }, 1000);
   }, [inputText]);
 
-  // Modificar a função speakMessage para receber o ID da mensagem temporária
+  // Modificar a função speakMessage para corrigir o timing de fechamento
   const speakMessage = async (text: string, tempId?: string) => {
     try {
       setIsSpeaking(true);
@@ -833,7 +863,7 @@ export default function ChatScreen() {
                 setShowSpeechBubble(false);
                 setShowAudioWave(false);
                 setAudioFinished(true);
-              }, 2000); // Esperar 2 segundos após o texto ser exibido completamente
+              }, 3000); // AUMENTAR: Esperar 3 segundos após o texto ser exibido completamente
             }
           }
         }
@@ -847,6 +877,7 @@ export default function ChatScreen() {
           console.log('Fala iniciada com sucesso');
         },
         onDone: () => {
+          console.log('Reprodução de áudio finalizada');
           setIsSpeaking(false);
           setIsAudioPlaying(false);
           setIsMuted(false); // Resetar o estado mudo
@@ -874,11 +905,12 @@ export default function ChatScreen() {
             // Scroll to bottom após mostrar a mensagem
             scrollToBottom();
             
+            // MODIFICAÇÃO: Aumentar o tempo para exibição completa antes de fechar
             // Sempre ocultar o balão quando terminar, independente do estado mudo
             setTimeout(() => {
               setShowSpeechBubble(false);
               setShowAudioWave(false); // Esconder componente de áudio também
-            }, 1000);
+            }, 3000); // AUMENTAR: de 1000ms para 3000ms (3 segundos)
           }
           
           // Limpa o intervalo se existir
@@ -888,6 +920,7 @@ export default function ChatScreen() {
           }
         },
         onError: () => {
+          console.log('Erro na reprodução do áudio');
           setIsSpeaking(false);
           setIsAudioPlaying(false);
           setIsMuted(false); // Resetar o estado mudo
@@ -908,6 +941,12 @@ export default function ChatScreen() {
             }));
             scrollToBottom();
           }
+          
+          // MODIFICAÇÃO: Aumentar o tempo antes de fechar em caso de erro
+          setTimeout(() => {
+            setShowSpeechBubble(false);
+            setShowAudioWave(false);
+          }, 3000); // AUMENTAR: para 3 segundos
           
           // Limpa o intervalo se existir
           if (textAnimationIntervalRef.current) {
@@ -1266,6 +1305,18 @@ export default function ChatScreen() {
             </TouchableOpacity>
           )}
         </View>
+        
+        {/* Indicador de digitação */}
+        {isTyping && (
+          <View style={styles.typingIndicator}>
+            <Text style={styles.typingText}>O assistente está digitando...</Text>
+            <View style={styles.dotContainer}>
+              <View style={[styles.dot, styles.dot1]} />
+              <View style={[styles.dot, styles.dot2]} />
+              <View style={[styles.dot, styles.dot3]} />
+            </View>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1549,5 +1600,42 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
     lineHeight: 22,
+  },
+  typingIndicator: {
+    position: 'absolute',
+    bottom: 70,
+    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 16,
+  },
+  typingText: {
+    fontSize: 12,
+    color: '#666',
+    marginRight: 6,
+  },
+  dotContainer: {
+    flexDirection: 'row',
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#666',
+    marginHorizontal: 2,
+    opacity: 0.8,
+  },
+  // Simular animação com diferentes opacidades
+  dot1: {
+    opacity: 0.4,
+  },
+  dot2: {
+    opacity: 0.7,
+  },
+  dot3: {
+    opacity: 1,
   },
 }); 

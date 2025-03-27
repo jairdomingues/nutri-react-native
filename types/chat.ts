@@ -33,6 +33,7 @@ export interface MessageBubbleProps {
 export interface AudioWaveProps {
     isPlaying: boolean;
     onPress: () => void;
+    isMuted?: boolean;
 }
 
 // Interface para status de áudio
